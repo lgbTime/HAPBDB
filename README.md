@@ -1,17 +1,17 @@
-# HAPDBD — Haplotype-Aware Phenotype Distance Breeding Decision
+# HAPBDB — Haplotype-Aware Phenotype Based Design Breeding
 
-A Python tool for haplotype clustering and genetic distance visualization from VCF (Variant Call Format) files. HAPDBD performs unsupervised hierarchical clustering on samples using Hamming distance over one-hot encoded haplotypes, then generates publication-quality visualizations: dendrograms, pairwise heatmaps, and base-level genotype tables. When extreme-phenotype accessions are specified, it automatically finds the minimum distance threshold that separates them — directly informing breeding selection decisions.
+A Python tool for haplotype clustering and genetic distance visualization from VCF (Variant Call Format) files. HAPBDB performs unsupervised hierarchical clustering on samples using Hamming distance over one-hot encoded haplotypes, then generates publication-quality visualizations: dendrograms, pairwise heatmaps, and base-level genotype tables. When extreme-phenotype accessions are specified, it automatically finds the minimum distance threshold that separates them — directly informing breeding selection decisions.
 
 The project includes two versions:
 
 | Version | Script | Use case |
 |---------|--------|----------|
-| **Single-trait** | `HAPDBD.py` | One VCF, one trait, one pair of extreme accessions |
-| **Multi-trait** | `multi_traits_HAPDBD/mutil_traits_HAPDBD.py` | Multiple traits, each with its own VCF and extreme accessions, merged into a breeding selection matrix |
+| **Single-trait** | `HAPBDB.py` | One VCF, one trait, one pair of extreme accessions |
+| **Multi-trait** | `multi_traits_HAPBDB/mutil_traits_HAPBDB.py` | Multiple traits, each with its own VCF and extreme accessions, merged into a breeding selection matrix |
 
 ---
 
-## Single-trait HAPDBD
+## Single-trait HAPBDB
 
 ### How It Works
 
@@ -44,7 +44,7 @@ The project includes two versions:
 ### Usage
 
 ```bash
-python HAPDBD.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N]
+python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N]
 ```
 
 | Argument | Required | Default | Description |
@@ -57,14 +57,14 @@ python HAPDBD.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_r
 
 **Example:**
 ```bash
-python HAPDBD.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
+python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
 ```
 
 ---
 
-## Multi-trait HAPDBD
+## Multi-trait HAPBDB
 
-`multi_traits_HAPDBD/mutil_traits_HAPDBD.py` extends the single-trait pipeline to handle **multiple traits simultaneously**. Each trait has its own VCF file and pair of extreme accessions. After per-trait clustering and threshold detection, it merges all results into a unified breeding selection framework.
+`multi_traits_HAPBDB/mutil_traits_HAPBDB.py` extends the single-trait pipeline to handle **multiple traits simultaneously**. Each trait has its own VCF file and pair of extreme accessions. After per-trait clustering and threshold detection, it merges all results into a unified breeding selection framework.
 
 ### Key additions over single-trait
 
@@ -103,7 +103,7 @@ A red-white-green diverging heatmap of the top 100 samples × all traits, with a
 ### Usage
 
 ```bash
-python mutil_traits_HAPDBD.py \
+python mutil_traits_HAPBDB.py \
     --trait t1:QTL_trait1.vcf,e1_acc,e2_acc \
     --trait t2:QTL_trait2.vcf,e1_acc,e2_acc \
     --prefix results/multi
@@ -130,7 +130,7 @@ Everything from single-trait (per trait, prefixed `{prefix}_{trait_name}_*`) plu
 ### Multi-trait example
 
 ```bash
-cd multi_traits_HAPDBD
+cd multi_traits_HAPBDB
 bash multi_traits.sh
 ```
 
@@ -154,16 +154,16 @@ pip install -r requirements.txt
 ## Project Structure
 
 ```
-HAPDBD/
-├── HAPDBD.py                      # Single-trait analysis pipeline
+HAPBDB/
+├── HAPBDB.py                      # Single-trait analysis pipeline
 ├── run.sh                         # Entry point → runs example.sh
 ├── example.sh                     # Single-trait demo
 ├── requirements.txt               # Python dependencies
 ├── demo_data/
 │   ├── extract_demo_vcf.py        # Extracts demo VCF from QTL1.vcf
 │   └── demo.vcf                   # 80 samples × 80 variants (includes CGN22050 & CGN22692)
-├── multi_traits_HAPDBD/
-│   ├── mutil_traits_HAPDBD.py     # Multi-trait pipeline with breeding scores
+├── multi_traits_HAPBDB/
+│   ├── mutil_traits_HAPBDB.py     # Multi-trait pipeline with breeding scores
 │   ├── multi_traits.sh            # Multi-trait demo (3 traits)
 │   ├── demo_data/
 │   │   ├── QTL_trait1_100.vcf     # 100 samples × 80 variants
@@ -175,7 +175,7 @@ HAPDBD/
 
 ## Use Case
 
-HAPDBD is designed for **marker-assisted breeding programs**:
+HAPBDB is designed for **marker-assisted breeding programs**:
 
 - Given QTL-associated VCF files and accessions at opposite trait extremes, identify the genetic distance threshold that separates favorable from unfavorable haplotypes.
 - Base table visualizations show which specific SNP alleles distinguish the clusters, helping breeders choose crosses that break undesirable linkages.
@@ -187,4 +187,4 @@ MIT License.
 
 ## Citation
 
-If you use HAPDBD in your research, please cite the repository.
+If you use HAPBDB in your research, please cite the repository.
