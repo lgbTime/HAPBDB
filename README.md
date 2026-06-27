@@ -64,7 +64,7 @@ python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
 
 ## Multi-trait HAPBDB
 
-`multi_traits_HAPBDB/mutil_traits_HAPBDB.py` extends the single-trait pipeline to handle **multiple traits simultaneously**. Each trait has its own VCF file and pair of extreme accessions. After per-trait clustering and threshold detection, it merges all results into a unified breeding selection framework.
+`multi_traits_HAPBDB/multi_traits_HAPBDB.py` extends the single-trait pipeline to handle **multiple traits simultaneously**. Each trait has its own VCF file and pair of extreme accessions. After per-trait clustering and threshold detection, it merges all results into a unified breeding selection framework.
 
 ### Key additions over single-trait
 
@@ -103,7 +103,7 @@ A red-white-green diverging heatmap of the top 100 samples × all traits, with a
 ### Usage
 
 ```bash
-python mutil_traits_HAPBDB.py \
+python multi_traits_HAPBDB.py \
     --trait t1:QTL_trait1.vcf,e1_acc,e2_acc \
     --trait t2:QTL_trait2.vcf,e1_acc,e2_acc \
     --prefix results/multi

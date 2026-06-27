@@ -1,1 +1,1 @@
-python mutil_traits_HAPBDB.py --trait t1:demo_data/QTL_trait1_100.vcf,X18,L14 --trait t2:demo_data/QTL_trait2_100.vcf,C10,C27 --trait t3:demo_data/QTL_trait3_100.vcf,C9,C12 --prefix demo_data_out/demo
+python multi_traits_HAPBDB.py --trait t1:demo_data/QTL_trait1_100.vcf,X18,L14 --trait t2:demo_data/QTL_trait2_100.vcf,C10,C27 --trait t3:demo_data/QTL_trait3_100.vcf,C9,C12 --prefix demo_data_out/demo
