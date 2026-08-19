@@ -25,7 +25,9 @@ The project includes two versions:
 
 5. **PCA overview** — Projects the one-hot haplotype matrix onto its top two principal components. Each sample is plotted as a point colored by its cluster (same cluster colors as the dendrogram), and the extreme accessions e1/e2 are highlighted with distinct markers and ID labels.
 
-6. **Haplotype–phenotype boxplot** — Simulates a quantitative trait and tests its distribution per haplotype cluster. Each sample's phenotype is interpolated between two **anchor accessions** based on its Hamming distance to them (anchors are fixed at their known values, small Gaussian noise is added), then drawn as a cluster-colored boxplot with anchor annotation. Configure with `--phenotype` (trait name) and `--anchors` (`acc:value,acc:value`); defaults: `Days to flowering`, anchors `W24` = 20 (early) and `CGN22692` = 60 (late). If an anchor is absent from the data, `--e1acc`/`--e2acc` are used instead (e1 = 20, e2 = 60). The simulated phenotype table is written to `{prefix}_{phenotype}_simulated_phenotype.txt`.
+6. **Haplotype–phenotype boxplot** — Draws the phenotype distribution per haplotype cluster. Two data sources:
+   - **Observed phenotypes** (recommended): provide a two-column file (`sample_id` + value, tab/space/comma separated, header allowed) via `--phenotype-file`; the boxplot then uses your real measurements and writes `{prefix}_{phenotype}_phenotype.txt`.
+   - **Simulated phenotypes** (fallback, no file given): each sample's phenotype is interpolated between two **anchor accessions** based on its Hamming distance to them (anchors are fixed at their known values, small Gaussian noise is added). Configure with `--phenotype` (trait name) and `--anchors` (`acc:value,acc:value`); defaults: `Days to flowering`, anchors `W24` = 20 (early) and `CGN22692` = 60 (late). If an anchor is absent from the data, `--e1acc`/`--e2acc` are used instead (e1 = 20, e2 = 60), and the table is written to `{prefix}_{phenotype}_simulated_phenotype.txt`.
 
 7. **Visualizations** — Generates publication-quality PDF figures: dendrogram, PCA, pairwise distance heatmaps (labeled + unlabeled), phenotype boxplot, haplotype base table and the combined tree + base table view, plus all tabular outputs.
 
@@ -56,8 +58,9 @@ An unlabeled, publication-style version of the heatmap is also written as `{pref
 | `{prefix}_hap_base_full_table.txt` | Full base-level genotype table (samples × variants) |
 | `{prefix}_tree_dendrogram.pdf` | Hierarchical clustering dendrogram (branches colored by cluster) |
 | `{prefix}_PCA.pdf` | PCA projection of haplotypes, colored by cluster, with e1/e2 highlighted |
-| `{prefix}_{phenotype}_boxplot.pdf` | Simulated phenotype per haplotype cluster (anchors annotated), e.g. `{prefix}_days_to_flowering_boxplot.pdf` |
-| `{prefix}_{phenotype}_simulated_phenotype.txt` | Simulated phenotype table (sample × cluster × phenotype value) |
+| `{prefix}_{phenotype}_boxplot.pdf` | Phenotype per haplotype cluster (anchors annotated), e.g. `{prefix}_days_to_flowering_boxplot.pdf` |
+| `{prefix}_{phenotype}_phenotype.txt` | Sample phenotype table (sample × cluster × value) — observed mode (`--phenotype-file`) |
+| `{prefix}_{phenotype}_simulated_phenotype.txt` | Sample phenotype table (sample × cluster × value) — simulated mode (no `--phenotype-file`) |
 | `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf` | Pairwise distance heatmap (unlabeled, publication style) |
 | `{prefix}_Pairwise_Hamming_Distanced_Heatmap_labeled.pdf` | Pairwise distance heatmap with sample-ID labels |
 | `{prefix}_hap_base_table.pdf` | Representative haplotype base table |
@@ -66,7 +69,7 @@ An unlabeled, publication-style version of the heatmap is also written as `{pref
 ### Usage
 
 ```bash
-python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N] [--phenotype NAME] [--anchors acc:value,acc:value]
+python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N] [--phenotype NAME] [--anchors acc:value,acc:value] [--phenotype-file FILE]
 ```
 
 | Argument | Required | Default | Description |
@@ -76,8 +79,9 @@ python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_r
 | `--e2acc` | No | `None` | Unfavorable extreme accession ID |
 | `--prefix` | No | `result` | Prefix for all output files |
 | `--max_reps` | No | *n_clusters* | Max representative haplotypes in base table plot |
-| `--phenotype` | No | `Days to flowering` | Phenotype name for the simulated boxplot (used in axis labels and output filenames) |
-| `--anchors` | No | `W24:20,CGN22692:60` | Anchor accessions and their phenotype values, format `acc:value,acc:value` |
+| `--phenotype` | No | `Days to flowering` | Phenotype name for the boxplot (used in axis labels and output filenames) |
+| `--anchors` | No | `W24:20,CGN22692:60` | Anchor accessions and their phenotype values (simulation only), format `acc:value,acc:value` |
+| `--phenotype-file` | No | `None` | Two-column phenotype file (`sample_id` value; tab/space/comma separated, header allowed). When provided, the boxplot uses these **observed** values instead of simulating |
 
 **Examples:**
 ```bash
@@ -87,6 +91,10 @@ python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
 # Custom phenotype and anchors, e.g. plant height (cm)
 python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis \
     --phenotype "Plant height (cm)" --anchors "CGN22050:90,CGN22692:40"
+
+# Observed phenotypes from your own file (two columns: sample_id, value)
+python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis \
+    --phenotype "Days to flowering" --phenotype-file my_phenotypes.txt
 ```
 
 ---
@@ -160,8 +168,9 @@ Each `--trait` argument has the format `name:vcf,e1,e2` and can be repeated for 
 |----------|-------------|
 | `--trait name:vcf,e1,e2` | Define one trait (repeat for each trait) |
 | `--prefix` | Output prefix (directory paths allowed) |
-| `--phenotype` | Phenotype name for the simulated boxplot (default: `Days to flowering`) |
+| `--phenotype` | Phenotype name for the boxplot (default: `Days to flowering`) |
 | `--anchors` | Anchor accessions and phenotype values for simulation (default: `W24:20,CGN22692:60`); per-trait `e1`/`e2` (e1 = 20, e2 = 60) are used as fallback when the anchors are not in a trait's VCF |
+| `--phenotype-file` | Two-column observed-phenotype file (`sample_id` value) applied to all traits; without it phenotypes are simulated per trait |
 
 **Backward compatible:** You can also call it with a single VCF and `--e1acc`/`--e2acc` like the single-trait version.
 

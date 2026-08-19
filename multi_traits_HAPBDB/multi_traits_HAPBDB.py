@@ -376,55 +376,106 @@ def plot_pca(haplotypes_array, sample_ids, cluster_map, acc1, acc2, prefix):
     print(f"[+] PCA plot saved to {prefix}_PCA.pdf (PC1 {var[0]:.1f}%, PC2 {var[1]:.1f}%)")
 
 
-### Simulate a quantitative phenotype from haplotype similarity to two anchor
-### accessions and draw a per-haplotype-cluster boxplot.
+### Load a two-column phenotype file (sample_id, value).
+### Auto-detects tab/space/comma separators and an optional header line.
+def load_phenotype_file(path):
+    import re
+    values = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = re.split(r'[\t,; ]+', line)
+            if len(parts) < 2:
+                continue
+            try:
+                values[parts[0]] = float(parts[1])
+            except ValueError:
+                continue  # header line or non-numeric token
+    if len(values) < 2:
+        raise ValueError(f"phenotype file '{path}' must contain at least 2 'sample value' lines")
+    return values
+
+
+### Draw a per-haplotype-cluster boxplot of a phenotype: observed values from a
+### phenotype file when provided, otherwise simulated from haplotype similarity.
 def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
                            anchors=None, fallback_anchors=None, seed=42,
-                           phenotype_label='Days to flowering'):
+                           phenotype_label='Days to flowering', observed=None):
     """`anchors`: {sample_id: phenotype}, e.g. {'W24': 20.0, 'CGN22692': 60.0}.
-    Samples genetically close to an anchor get phenotypes close to that anchor
-    (linear interpolation of pairwise Hamming distance, plus small noise).
-    `fallback_anchors` are tried when an anchor is missing from the data.
-    Also writes {prefix}_{phenotype}_simulated_phenotype.txt."""
-    if anchors is None:
-        anchors = {'W24': 20.0, 'CGN22692': 60.0}
-    present = {acc: val for acc, val in anchors.items() if acc in sample_ids}
-    if len(present) < 2 and fallback_anchors:
-        for acc, val in fallback_anchors.items():
-            if acc in sample_ids and acc not in present:
-                present[acc] = val
-    if len(present) < 2:
-        print(f"[!] phenotype boxplot skipped: need >=2 anchor accessions present in the data "
-              f"(anchors={list(anchors)}, found={list(present)})")
-        return
-
+    `observed`: {sample_id: float} phenotypes loaded from --phenotype-file.
+    Without `observed`, phenotypes are simulated: samples genetically close to an
+    anchor get phenotypes close to that anchor (linear interpolation of pairwise
+    Hamming distance, plus small noise); `fallback_anchors` are tried when an
+    anchor is missing from the data.
+    Writes {prefix}_{phenotype}_boxplot.pdf plus {prefix}_{phenotype}_phenotype.txt
+    (observed) or {prefix}_{phenotype}_simulated_phenotype.txt (simulated)."""
     slug = ''.join(c if c.isalnum() else '_' for c in phenotype_label.lower()).strip('_')
     while '__' in slug:
         slug = slug.replace('__', '_')
-    rng = np.random.default_rng(seed)
-    hap = np.asarray(haplotypes_array)
-    phenos = np.full(len(sample_ids), np.nan)
-
-    # Hamming distance of every sample to each anchor
-    acc_items = list(present.items())
-    (acc1, ph1), (acc2, ph2) = acc_items[0], acc_items[1]
-    d1 = np.mean(hap != hap[sample_ids.index(acc1)], axis=1)
-    d2 = np.mean(hap != hap[sample_ids.index(acc2)], axis=1)
-
-    # s in [0,1]: 0 -> like acc1 (e.g. early flowering), 1 -> like acc2 (late)
-    s = d1 / (d1 + d2 + 1e-12)
-    phenos = ph1 + s * (ph2 - ph1) + rng.normal(0, 1.5, len(sample_ids))
-    phenos = np.clip(phenos, min(ph1, ph2), max(ph1, ph2))
-    for acc, val in present.items():
-        phenos[sample_ids.index(acc)] = val
-
-    # Group by haplotype cluster; order clusters by median phenotype (early -> late)
     labels = [str(cluster_map.get(sid, 'H?')) for sid in sample_ids] if cluster_map else ['H1'] * len(sample_ids)
-    order = sorted(set(labels), key=lambda lab: np.median(phenos[np.array(labels) == lab]))
+
+    if observed is not None:
+        # ----- observed phenotypes -----
+        phenos = np.array([observed.get(sid, np.nan) for sid in sample_ids], dtype=float)
+        n_obs = int(np.isfinite(phenos).sum())
+        if n_obs < 3:
+            print(f"[!] phenotype boxplot skipped: only {n_obs} samples with observed phenotypes")
+            return
+        # annotate anchors that have observed values; else annotate min/max samples
+        present = {}
+        for acc in (anchors or {}):
+            if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]):
+                present[acc] = phenos[sample_ids.index(acc)]
+        for acc in (fallback_anchors or {}):
+            if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]) and acc not in present:
+                present[acc] = phenos[sample_ids.index(acc)]
+        if not present:
+            valid = [(sid, p) for sid, p in zip(sample_ids, phenos) if np.isfinite(p)]
+            if valid:
+                lo = min(valid, key=lambda t: t[1])
+                hi = max(valid, key=lambda t: t[1])
+                present = {lo[0]: lo[1], hi[0]: hi[1]}
+        source_note = f"observed phenotypes (n={n_obs})"
+        out_table = f"{prefix}_{slug}_phenotype.txt"
+    else:
+        # ----- simulated phenotypes -----
+        if anchors is None:
+            anchors = {'W24': 20.0, 'CGN22692': 60.0}
+        present = {acc: val for acc, val in anchors.items() if acc in sample_ids}
+        if len(present) < 2 and fallback_anchors:
+            for acc, val in fallback_anchors.items():
+                if acc in sample_ids and acc not in present:
+                    present[acc] = val
+        if len(present) < 2:
+            print(f"[!] phenotype boxplot skipped: need >=2 anchor accessions present in the data "
+                  f"(anchors={list(anchors)}, found={list(present)})")
+            return
+        rng = np.random.default_rng(seed)
+        hap = np.asarray(haplotypes_array)
+        phenos = np.full(len(sample_ids), np.nan)
+        acc_items = list(present.items())
+        (acc1, ph1), (acc2, ph2) = acc_items[0], acc_items[1]
+        d1 = np.mean(hap != hap[sample_ids.index(acc1)], axis=1)
+        d2 = np.mean(hap != hap[sample_ids.index(acc2)], axis=1)
+        # s in [0,1]: 0 -> like acc1 (e.g. early flowering), 1 -> like acc2 (late)
+        s = d1 / (d1 + d2 + 1e-12)
+        phenos = ph1 + s * (ph2 - ph1) + rng.normal(0, 1.5, len(sample_ids))
+        phenos = np.clip(phenos, min(ph1, ph2), max(ph1, ph2))
+        for acc, val in present.items():
+            phenos[sample_ids.index(acc)] = val
+        source_note = f"simulated from anchors {acc1}={ph1:.0f}, {acc2}={ph2:.0f}"
+        out_table = f"{prefix}_{slug}_simulated_phenotype.txt"
+
+    # Group by haplotype cluster; order clusters by median phenotype
+    keep = np.isfinite(phenos)
+    order = sorted(set(np.array(labels)[keep]),
+                   key=lambda lab: np.median(phenos[np.array(labels) == lab]))
     color_map = {lab: LINK_COLORS[i % len(LINK_COLORS)] for i, lab in enumerate(order)}
 
     fig, ax = plt.subplots(figsize=(max(5.0, len(order) * 0.9), 4.6))
-    data = [phenos[np.array(labels) == lab] for lab in order]
+    data = [phenos[(np.array(labels) == lab) & keep] for lab in order]
     bp = ax.boxplot(data, patch_artist=True, widths=0.55,
                     medianprops=dict(color='black', linewidth=1.1),
                     flierprops=dict(marker='o', markersize=3, markerfacecolor='#999999',
@@ -450,7 +501,7 @@ def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
 
     ax.set_ylabel(phenotype_label)
     ax.set_xlabel('Haplotype cluster')
-    ax.set_title(f'{phenotype_label} by Haplotype Cluster', pad=10)
+    ax.set_title(f'{phenotype_label} by Haplotype Cluster ({"observed" if observed is not None else "simulated"})', pad=10)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
@@ -459,12 +510,12 @@ def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
                 backend=CAIRO_BACKEND)
     plt.close(fig)
 
-    with open(f"{prefix}_{slug}_simulated_phenotype.txt", "w") as f:
+    with open(out_table, "w") as f:
         f.write("sample_id\tcluster\tphenotype\n")
         for sid, lab, p in zip(sample_ids, labels, phenos):
-            f.write(f"{sid}\t{lab}\t{p:.2f}\n")
-    print(f"[+] {phenotype_label} boxplot saved to {prefix}_{slug}_boxplot.pdf "
-          f"(anchors: {acc1}={ph1:.0f}, {acc2}={ph2:.0f})")
+            if np.isfinite(p):
+                f.write(f"{sid}\t{lab}\t{p:.2f}\n")
+    print(f"[+] {phenotype_label} boxplot saved to {prefix}_{slug}_boxplot.pdf ({source_note})")
 
 ### Map an allele to a display symbol: SNP base, 'I' (indel), 'SV' or 'NA'.
 def classify_allele(a):
@@ -843,8 +894,10 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
 
 
 ### Main pipeline: per-trait haplotype analysis + breeding selection merge.
-def bro(traits, prefix, max_reps=None, phenotype_label='Days to flowering', anchors=None):
+def bro(traits, prefix, max_reps=None, phenotype_label='Days to flowering', anchors=None,
+        phenotype_file=None):
     """traits: list of (name, vcf, e1, e2). Runs per-trait clustering, then merges into breeding outputs."""
+    observed = load_phenotype_file(phenotype_file) if phenotype_file else None
     all_trait_results = {}
     all_sample_ids = set()
 
@@ -869,7 +922,7 @@ def bro(traits, prefix, max_reps=None, phenotype_label='Days to flowering', anch
         plot_pca(hap_array, sample_ids, cm_for_plot, e1, e2, trait_prefix)
         plot_phenotype_boxplot(hap_array, sample_ids, cm_for_plot, trait_prefix,
                                anchors=anchors, fallback_anchors={e1: 20.0, e2: 60.0},
-                               phenotype_label=phenotype_label)
+                               phenotype_label=phenotype_label, observed=observed)
         plot_base_hap_table_from_clustering(base_df, clu_df, cm_for_plot, e1, e2,
                                             output_file=f'{trait_prefix}_hap_base_table.pdf', max_reps=reps)
         plot_tree_with_base_table(f"{trait_prefix}_linkage_matrix.npy",
@@ -902,6 +955,10 @@ if __name__ == "__main__":
     parser.add_argument('--anchors', type=str, default='W24:20,CGN22692:60',
                         help='Anchor accessions and their phenotype values for simulation, '
                              'format "acc:value,acc:value" (default: "W24:20,CGN22692:60").')
+    parser.add_argument('--phenotype-file', type=str, default=None,
+                        help='Optional two-column phenotype file (sample_id, value; tab/space/comma '
+                             'separated, header allowed). When provided, per-trait boxplots use '
+                             'these observed values instead of simulating phenotypes.')
     args = parser.parse_args()
 
     # Normalize to traits list: list of (name, vcf, e1, e2)
@@ -929,6 +986,7 @@ if __name__ == "__main__":
             parser.error(f"--anchors format must be acc:value,acc:value, got '{item}'")
         acc, val = item.split(':', 1)
         anchors[acc.strip()] = float(val)
-    bro(traits, args.prefix, args.max_reps, phenotype_label=args.phenotype, anchors=anchors)
+    bro(traits, args.prefix, args.max_reps, phenotype_label=args.phenotype, anchors=anchors,
+        phenotype_file=args.phenotype_file)
 
 
