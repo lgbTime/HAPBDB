@@ -314,75 +314,42 @@ def load_phenotype_file(path):
     return values
 
 
-### Draw a per-haplotype-cluster boxplot of a phenotype: observed values from a
-### phenotype file when provided, otherwise simulated from haplotype similarity.
-def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
-                           anchors=None, fallback_anchors=None, seed=42,
-                           phenotype_label='phenotype', observed=None):
-    """`anchors`: {sample_id: phenotype}, e.g. {'W24': 20.0, 'CGN22692': 60.0}.
-    `observed`: {sample_id: float} phenotypes loaded from --phenotype-file.
-    Without `observed`, phenotypes are simulated: samples genetically close to an
-    anchor get phenotypes close to that anchor (linear interpolation of pairwise
-    Hamming distance, plus small noise); `fallback_anchors` are tried when an
-    anchor is missing from the data.
-    Writes {prefix}_{phenotype}_boxplot.pdf plus {prefix}_{phenotype}_phenotype.txt
-    (observed) or {prefix}_{phenotype}_simulated_phenotype.txt (simulated)."""
+### Draw a per-haplotype-cluster boxplot of observed phenotypes. Only runs when
+### a phenotype file is provided via --phenotype-file.
+def plot_phenotype_boxplot(sample_ids, cluster_map, prefix, phenotype_label='phenotype',
+                           observed=None, anchors=None, fallback_anchors=None, seed=42):
+    """`observed`: {sample_id: float} phenotypes loaded from --phenotype-file.
+    `anchors`/`fallback_anchors` name accessions to annotate on the plot (their
+    observed values are shown); if none of them have values, the samples with
+    the minimum and maximum phenotype are annotated instead.
+    Writes {prefix}_{phenotype}_boxplot.pdf and {prefix}_{phenotype}_phenotype.txt."""
+    if observed is None:
+        print("[i] phenotype boxplot skipped: provide --phenotype-file to activate it.")
+        return
     slug = ''.join(c if c.isalnum() else '_' for c in phenotype_label.lower()).strip('_')
     while '__' in slug:
         slug = slug.replace('__', '_')
     labels = [str(cluster_map.get(sid, 'H?')) for sid in sample_ids] if cluster_map else ['H1'] * len(sample_ids)
 
-    if observed is not None:
-        # ----- observed phenotypes -----
-        phenos = np.array([observed.get(sid, np.nan) for sid in sample_ids], dtype=float)
-        n_obs = int(np.isfinite(phenos).sum())
-        if n_obs < 3:
-            print(f"[!] phenotype boxplot skipped: only {n_obs} samples with observed phenotypes")
-            return
-        # annotate anchors that have observed values; else annotate min/max samples
-        present = {}
-        for acc in (anchors or {}):
-            if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]):
-                present[acc] = phenos[sample_ids.index(acc)]
-        for acc in (fallback_anchors or {}):
-            if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]) and acc not in present:
-                present[acc] = phenos[sample_ids.index(acc)]
-        if not present:
-            valid = [(sid, p) for sid, p in zip(sample_ids, phenos) if np.isfinite(p)]
-            if valid:
-                lo = min(valid, key=lambda t: t[1])
-                hi = max(valid, key=lambda t: t[1])
-                present = {lo[0]: lo[1], hi[0]: hi[1]}
-        source_note = f"observed phenotypes (n={n_obs})"
-        out_table = f"{prefix}_{slug}_phenotype.txt"
-    else:
-        # ----- simulated phenotypes -----
-        if anchors is None:
-            anchors = {'W24': 20.0, 'CGN22692': 60.0}
-        present = {acc: val for acc, val in anchors.items() if acc in sample_ids}
-        if len(present) < 2 and fallback_anchors:
-            for acc, val in fallback_anchors.items():
-                if acc in sample_ids and acc not in present:
-                    present[acc] = val
-        if len(present) < 2:
-            print(f"[!] phenotype boxplot skipped: need >=2 anchor accessions present in the data "
-                  f"(anchors={list(anchors)}, found={list(present)})")
-            return
-        rng = np.random.default_rng(seed)
-        hap = np.asarray(haplotypes_array)
-        phenos = np.full(len(sample_ids), np.nan)
-        acc_items = list(present.items())
-        (acc1, ph1), (acc2, ph2) = acc_items[0], acc_items[1]
-        d1 = np.mean(hap != hap[sample_ids.index(acc1)], axis=1)
-        d2 = np.mean(hap != hap[sample_ids.index(acc2)], axis=1)
-        # s in [0,1]: 0 -> like acc1 (e.g. early flowering), 1 -> like acc2 (late)
-        s = d1 / (d1 + d2 + 1e-12)
-        phenos = ph1 + s * (ph2 - ph1) + rng.normal(0, 1.5, len(sample_ids))
-        phenos = np.clip(phenos, min(ph1, ph2), max(ph1, ph2))
-        for acc, val in present.items():
-            phenos[sample_ids.index(acc)] = val
-        source_note = f"simulated from anchors {acc1}={ph1:.0f}, {acc2}={ph2:.0f}"
-        out_table = f"{prefix}_{slug}_simulated_phenotype.txt"
+    phenos = np.array([observed.get(sid, np.nan) for sid in sample_ids], dtype=float)
+    n_obs = int(np.isfinite(phenos).sum())
+    if n_obs < 3:
+        print(f"[!] phenotype boxplot skipped: only {n_obs} samples with observed phenotypes")
+        return
+
+    # annotate requested accessions that have observed values; else min/max samples
+    present = {}
+    for acc in (anchors or {}):
+        if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]):
+            present[acc] = phenos[sample_ids.index(acc)]
+    for acc in (fallback_anchors or {}):
+        if acc in sample_ids and np.isfinite(phenos[sample_ids.index(acc)]) and acc not in present:
+            present[acc] = phenos[sample_ids.index(acc)]
+    if not present:
+        valid = [(sid, p) for sid, p in zip(sample_ids, phenos) if np.isfinite(p)]
+        lo = min(valid, key=lambda t: t[1])
+        hi = max(valid, key=lambda t: t[1])
+        present = {lo[0]: lo[1], hi[0]: hi[1]}
 
     # Group by haplotype cluster; order clusters by median phenotype
     keep = np.isfinite(phenos)
@@ -407,7 +374,7 @@ def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
         vals = data[i]
         x = np.random.default_rng(seed + i).normal(i + 1, 0.06, len(vals))
         ax.scatter(x, vals, s=14, color='black', alpha=0.35, zorder=3, linewidths=0)
-    # Annotate anchor accessions
+    # Annotate extreme/anchored accessions
     for acc, val in present.items():
         lab = str(cluster_map.get(acc, 'H?'))
         if lab in order:
@@ -417,7 +384,7 @@ def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
 
     ax.set_ylabel(phenotype_label)
     ax.set_xlabel('Haplotype cluster')
-    ax.set_title(f'{phenotype_label} by Haplotype Cluster ({"observed" if observed is not None else "simulated"})', pad=10)
+    ax.set_title(f'{phenotype_label} by Haplotype Cluster', pad=10)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
@@ -426,12 +393,13 @@ def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
                 backend=CAIRO_BACKEND)
     plt.close(fig)
 
-    with open(out_table, "w") as f:
+    with open(f"{prefix}_{slug}_phenotype.txt", "w") as f:
         f.write("sample_id\tcluster\tphenotype\n")
         for sid, lab, p in zip(sample_ids, labels, phenos):
             if np.isfinite(p):
                 f.write(f"{sid}\t{lab}\t{p:.2f}\n")
-    print(f"[+] {phenotype_label} boxplot saved to {prefix}_{slug}_boxplot.pdf ({source_note})")
+    print(f"[+] {phenotype_label} boxplot saved to {prefix}_{slug}_boxplot.pdf "
+          f"(observed phenotypes, n={n_obs})")
 
 ### Map an allele to a display symbol: SNP base, 'I' (indel), 'SV' or 'NA'.
 def classify_allele(a):
@@ -640,8 +608,8 @@ def bro(pop_vcf, acc1, acc2, prefix, max_reps=None, phenotype_label='phenotype',
     tree_cluster_map, sep_threshold = treebase_hap(distance_matrix_all, sample_ids, acc1, acc2, prefix)
     plot_pca(haplotypes_array, sample_ids, tree_cluster_map, acc1, acc2, prefix)
     observed = load_phenotype_file(phenotype_file) if phenotype_file else None
-    plot_phenotype_boxplot(haplotypes_array, sample_ids, tree_cluster_map, prefix,
-                           anchors=anchors, observed=observed, phenotype_label=phenotype_label)
+    plot_phenotype_boxplot(sample_ids, tree_cluster_map, prefix, observed=observed,
+                           anchors=anchors, phenotype_label=phenotype_label)
     plot_heatmap(distance_matrix_all, sample_ids, filename=f'{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf')
     base_df = vcf_to_base_matrix(pop_vcf)
     reps_to_use = n_clu if max_reps is None else max_reps
@@ -662,12 +630,12 @@ if __name__ == "__main__":
     parser.add_argument('--phenotype', type=str, default='phenotype',
                         help='Phenotype name used for the simulated boxplot (default: "phenotype").')
     parser.add_argument('--anchors', type=str, default='W24:20,CGN22692:60',
-                        help='Anchor accessions and their phenotype values for simulation, '
-                             'format "acc:value,acc:value" (default: "W24:20,CGN22692:60").')
+                        help='Accessions to annotate on the boxplot (must have values in the '
+                             'phenotype file), format "acc:value,acc:value".')
     parser.add_argument('--phenotype-file', type=str, default=None,
-                        help='Optional two-column phenotype file (sample_id, value; tab/space/comma '
-                             'separated, header allowed). When provided, the boxplot uses these '
-                             'observed values instead of simulating phenotypes.')
+                        help='Two-column phenotype file (sample_id, value; tab/space/comma '
+                             'separated, header allowed). Required to activate the phenotype '
+                             'boxplot; without it no boxplot is produced.')
     args = parser.parse_args()
     anchors = {}
     for item in args.anchors.split(','):
