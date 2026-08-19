@@ -27,7 +27,7 @@ The project includes two versions:
 
 6. **Haplotype–phenotype boxplot** — Draws the phenotype distribution per haplotype cluster. Two data sources:
    - **Observed phenotypes** (recommended): provide a two-column file (`sample_id` + value, tab/space/comma separated, header allowed) via `--phenotype-file`; the boxplot then uses your real measurements and writes `{prefix}_{phenotype}_phenotype.txt`.
-   - **Simulated phenotypes** (fallback, no file given): each sample's phenotype is interpolated between two **anchor accessions** based on its Hamming distance to them (anchors are fixed at their known values, small Gaussian noise is added). Configure with `--phenotype` (trait name) and `--anchors` (`acc:value,acc:value`); defaults: `Days to flowering`, anchors `W24` = 20 (early) and `CGN22692` = 60 (late). If an anchor is absent from the data, `--e1acc`/`--e2acc` are used instead (e1 = 20, e2 = 60), and the table is written to `{prefix}_{phenotype}_simulated_phenotype.txt`.
+   - **Simulated phenotypes** (fallback, no file given): each sample's phenotype is interpolated between two **anchor accessions** based on its Hamming distance to them (anchors are fixed at their known values, small Gaussian noise is added). Configure with `--phenotype` (trait name, default `phenotype`) and `--anchors` (`acc:value,acc:value`); default anchors: `W24` = 20 (early) and `CGN22692` = 60 (late). If an anchor is absent from the data, `--e1acc`/`--e2acc` are used instead (e1 = 20, e2 = 60), and the table is written to `{prefix}_{phenotype}_simulated_phenotype.txt`.
 
 7. **Visualizations** — Generates publication-quality PDF figures: dendrogram, PCA, pairwise distance heatmaps (labeled + unlabeled), phenotype boxplot, haplotype base table and the combined tree + base table view, plus all tabular outputs.
 
@@ -41,9 +41,9 @@ The figures below were generated from the demo dataset (`demo_data/demo.vcf`, 80
 
 An unlabeled, publication-style version of the heatmap is also written as `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf`.
 
-| Representative haplotype base table | Dendrogram + base table (combined) | Days to flowering by haplotype cluster |
-|-------------------------------------|------------------------------------|----------------------------------------|
-| ![Base table](figures/demo_hap_base_table.png) | ![Tree with base table](figures/demo_tree_with_base_table.png) | ![Flowering boxplot](figures/demo_days_to_flowering_boxplot.png) |
+| Representative haplotype base table | Dendrogram + base table (combined) | Simulated phenotype by haplotype cluster |
+|-------------------------------------|------------------------------------|------------------------------------------|
+| ![Base table](figures/demo_hap_base_table.png) | ![Tree with base table](figures/demo_tree_with_base_table.png) | ![Phenotype boxplot](figures/demo_phenotype_boxplot.png) |
 
 ### Output files
 
@@ -58,7 +58,7 @@ An unlabeled, publication-style version of the heatmap is also written as `{pref
 | `{prefix}_hap_base_full_table.txt` | Full base-level genotype table (samples × variants) |
 | `{prefix}_tree_dendrogram.pdf` | Hierarchical clustering dendrogram (branches colored by cluster) |
 | `{prefix}_PCA.pdf` | PCA projection of haplotypes, colored by cluster, with e1/e2 highlighted |
-| `{prefix}_{phenotype}_boxplot.pdf` | Phenotype per haplotype cluster (anchors annotated), e.g. `{prefix}_days_to_flowering_boxplot.pdf` |
+| `{prefix}_{phenotype}_boxplot.pdf` | Phenotype per haplotype cluster (anchors annotated), e.g. `{prefix}_phenotype_boxplot.pdf` |
 | `{prefix}_{phenotype}_phenotype.txt` | Sample phenotype table (sample × cluster × value) — observed mode (`--phenotype-file`) |
 | `{prefix}_{phenotype}_simulated_phenotype.txt` | Sample phenotype table (sample × cluster × value) — simulated mode (no `--phenotype-file`) |
 | `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf` | Pairwise distance heatmap (unlabeled, publication style) |
@@ -79,16 +79,16 @@ python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_r
 | `--e2acc` | No | `None` | Unfavorable extreme accession ID |
 | `--prefix` | No | `result` | Prefix for all output files |
 | `--max_reps` | No | *n_clusters* | Max representative haplotypes in base table plot |
-| `--phenotype` | No | `Days to flowering` | Phenotype name for the boxplot (used in axis labels and output filenames) |
+| `--phenotype` | No | `phenotype` | Phenotype name for the boxplot (used in axis labels and output filenames) |
 | `--anchors` | No | `W24:20,CGN22692:60` | Anchor accessions and their phenotype values (simulation only), format `acc:value,acc:value` |
 | `--phenotype-file` | No | `None` | Two-column phenotype file (`sample_id` value; tab/space/comma separated, header allowed). When provided, the boxplot uses these **observed** values instead of simulating |
 
 **Examples:**
 ```bash
-# Default demo: flowering time simulated from W24 (20 d) and CGN22692 (60 d)
+# Default: phenotype simulated from anchors W24 (20) and CGN22692 (60)
 python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
 
-# Custom phenotype and anchors, e.g. plant height (cm)
+# Custom phenotype name and anchors, e.g. plant height (cm)
 python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis \
     --phenotype "Plant height (cm)" --anchors "CGN22050:90,CGN22692:40"
 
@@ -151,7 +151,7 @@ Per-trait PCA, phenotype boxplots, heatmaps and base tables are also produced fo
 
 | t1 haplotype PCA (e1/e2 marked) | t1 flowering-time boxplot | t1 labeled distance heatmap | t1 haplotype base table |
 |---------------------------------|---------------------------|-----------------------------|-------------------------|
-| ![t1 PCA](figures/demo_t1_PCA.png) | ![t1 boxplot](figures/demo_t1_days_to_flowering_boxplot.png) | ![t1 heatmap](figures/demo_t1_Pairwise_Hamming_Distanced_Heatmap_labeled.png) | ![t1 base table](figures/demo_t1_hap_base_table.png) |
+| ![t1 PCA](figures/demo_t1_PCA.png) | ![t1 boxplot](figures/demo_t1_phenotype_boxplot.png) | ![t1 heatmap](figures/demo_t1_Pairwise_Hamming_Distanced_Heatmap_labeled.png) | ![t1 base table](figures/demo_t1_hap_base_table.png) |
 
 ### Usage
 
@@ -168,7 +168,7 @@ Each `--trait` argument has the format `name:vcf,e1,e2` and can be repeated for 
 |----------|-------------|
 | `--trait name:vcf,e1,e2` | Define one trait (repeat for each trait) |
 | `--prefix` | Output prefix (directory paths allowed) |
-| `--phenotype` | Phenotype name for the boxplot (default: `Days to flowering`) |
+| `--phenotype` | Phenotype name for the boxplot (default: `phenotype`) |
 | `--anchors` | Anchor accessions and phenotype values for simulation (default: `W24:20,CGN22692:60`); per-trait `e1`/`e2` (e1 = 20, e2 = 60) are used as fallback when the anchors are not in a trait's VCF |
 | `--phenotype-file` | Two-column observed-phenotype file (`sample_id` value) applied to all traits; without it phenotypes are simulated per trait |
 

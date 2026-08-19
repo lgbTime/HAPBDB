@@ -402,7 +402,7 @@ def load_phenotype_file(path):
 ### phenotype file when provided, otherwise simulated from haplotype similarity.
 def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
                            anchors=None, fallback_anchors=None, seed=42,
-                           phenotype_label='Days to flowering', observed=None):
+                           phenotype_label='phenotype', observed=None):
     """`anchors`: {sample_id: phenotype}, e.g. {'W24': 20.0, 'CGN22692': 60.0}.
     `observed`: {sample_id: float} phenotypes loaded from --phenotype-file.
     Without `observed`, phenotypes are simulated: samples genetically close to an
@@ -894,7 +894,7 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
 
 
 ### Main pipeline: per-trait haplotype analysis + breeding selection merge.
-def bro(traits, prefix, max_reps=None, phenotype_label='Days to flowering', anchors=None,
+def bro(traits, prefix, max_reps=None, phenotype_label='phenotype', anchors=None,
         phenotype_file=None):
     """traits: list of (name, vcf, e1, e2). Runs per-trait clustering, then merges into breeding outputs."""
     observed = load_phenotype_file(phenotype_file) if phenotype_file else None
@@ -950,8 +950,8 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, default='result', help='Prefix for all output files.')
     parser.add_argument('--max_reps', type=int, default=None,
                         help='Maximum number of representative haplotypes to plot (default: number of clusters).')
-    parser.add_argument('--phenotype', type=str, default='Days to flowering',
-                        help='Phenotype name used for the simulated boxplot (default: "Days to flowering").')
+    parser.add_argument('--phenotype', type=str, default='phenotype',
+                        help='Phenotype name used for the simulated boxplot (default: "phenotype").')
     parser.add_argument('--anchors', type=str, default='W24:20,CGN22692:60',
                         help='Anchor accessions and their phenotype values for simulation, '
                              'format "acc:value,acc:value" (default: "W24:20,CGN22692:60").')

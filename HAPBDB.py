@@ -318,7 +318,7 @@ def load_phenotype_file(path):
 ### phenotype file when provided, otherwise simulated from haplotype similarity.
 def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
                            anchors=None, fallback_anchors=None, seed=42,
-                           phenotype_label='Days to flowering', observed=None):
+                           phenotype_label='phenotype', observed=None):
     """`anchors`: {sample_id: phenotype}, e.g. {'W24': 20.0, 'CGN22692': 60.0}.
     `observed`: {sample_id: float} phenotypes loaded from --phenotype-file.
     Without `observed`, phenotypes are simulated: samples genetically close to an
@@ -634,7 +634,7 @@ def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, pr
     print(f"[+] Combined tree + haplotype base table saved to {output_pdf}")
 
 ### Main pipeline function for haplotype clustering and visualization.
-def bro(pop_vcf, acc1, acc2, prefix, max_reps=None, phenotype_label='Days to flowering',
+def bro(pop_vcf, acc1, acc2, prefix, max_reps=None, phenotype_label='phenotype',
         anchors=None, phenotype_file=None):
     clu_df, n_clu, distance_matrix_all, unique_indices, sample_ids, haplotypes_array = uclu(pop_vcf, prefix)
     tree_cluster_map, sep_threshold = treebase_hap(distance_matrix_all, sample_ids, acc1, acc2, prefix)
@@ -659,8 +659,8 @@ if __name__ == "__main__":
     parser.add_argument('--e2acc', type=str, default=None, help='The extreme phenotype accession that has an unfavorable trait (ID must be in the VCF).')
     parser.add_argument('--prefix', type=str, default='result', help='Prefix for all output files.')
     parser.add_argument('--max_reps', type=int, default=None, help='Maximum number of representative haplotypes to plot (default: number of clusters).')
-    parser.add_argument('--phenotype', type=str, default='Days to flowering',
-                        help='Phenotype name used for the simulated boxplot (default: "Days to flowering").')
+    parser.add_argument('--phenotype', type=str, default='phenotype',
+                        help='Phenotype name used for the simulated boxplot (default: "phenotype").')
     parser.add_argument('--anchors', type=str, default='W24:20,CGN22692:60',
                         help='Anchor accessions and their phenotype values for simulation, '
                              'format "acc:value,acc:value" (default: "W24:20,CGN22692:60").')
