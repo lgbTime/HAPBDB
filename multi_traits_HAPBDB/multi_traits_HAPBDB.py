@@ -3,13 +3,24 @@ import matplotlib
 matplotlib.use('Agg')
 
 # --------------------------------
-# Adobe‑editable fonts
+# Journal-grade figure styling
 # --------------------------------
 from matplotlib import rcParams
 rcParams["pdf.fonttype"] = 42
 rcParams["ps.fonttype"] = 42
 rcParams["font.family"] = "sans-serif"
-rcParams["font.sans-serif"] = ["Arial"]
+rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
+rcParams["font.size"] = 8
+rcParams["axes.titlesize"] = 10
+rcParams["axes.labelsize"] = 9
+rcParams["xtick.labelsize"] = 7
+rcParams["ytick.labelsize"] = 7
+rcParams["legend.fontsize"] = 8
+rcParams["axes.linewidth"] = 0.6
+rcParams["xtick.major.width"] = 0.6
+rcParams["ytick.major.width"] = 0.6
+rcParams["axes.spines.top"] = False
+rcParams["axes.spines.right"] = False
 
 import numpy as np
 import pandas as pd
@@ -20,6 +31,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import squareform
 import os
 try:
     import cairo
@@ -27,23 +39,64 @@ try:
 except ImportError:
     CAIRO_BACKEND = "pdf"
 
+# Colorblind-safe palette for dendrogram cluster branches (Okabe-Ito + ColorBrewer Dark2/Set2 extensions)
+LINK_COLORS = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#E69F00', '#56B4E9',
+               '#1B9E77', '#D95F02', '#7570B3', '#E7298A', '#66A61E', '#E6AB02',
+               '#A6761D', '#8DA0CB', '#E78AC3', '#A6D854', '#FC8D62', '#66C2A5',
+               '#B3B3B3', '#666666']
+ABOVE_THRESHOLD_COLOR = '#333333'
+
+
+def _link_color_func(linkage_matrix, n_samples, threshold, palette=LINK_COLORS):
+    """Build a scipy dendrogram link_color_func coloring each link by its flat
+    cluster at `threshold` (identical to the *_extram_based.txt membership).
+    Links at/above the threshold (tree trunk) are dark gray. Returns None when
+    `threshold` is None, letting scipy use its default cluster coloring."""
+    if threshold is None:
+        return None
+    flat = sch.fcluster(linkage_matrix, threshold, criterion='distance')
+    n_links = len(linkage_matrix)
+    link_cluster = [None] * n_links
+    for i in range(n_links):
+        if linkage_matrix[i, 2] >= threshold:
+            continue
+        # any leaf under this link belongs to its flat cluster
+        stack = [n_samples + i]
+        first_leaf = None
+        while stack:
+            node = stack.pop()
+            if node < n_samples:
+                first_leaf = node
+                break
+            stack.extend([int(linkage_matrix[node - n_samples, 0]),
+                          int(linkage_matrix[node - n_samples, 1])])
+        link_cluster[i] = flat[first_leaf]
+
+    def _color(link_id):
+        # scipy passes extended ids: leaves 0..n-1, links n..2n-2
+        row = link_id - n_samples
+        if row < 0 or row >= n_links:
+            return ABOVE_THRESHOLD_COLOR
+        cl = link_cluster[row]
+        if cl is None:
+            return ABOVE_THRESHOLD_COLOR
+        return palette[(cl - 1) % len(palette)]
+
+    return _color
+
 ### Construct haplotype tree and perform clustering analysis based on hierarchical clustering
 def treebase_hap(distance_matrix, sample_ids, traits, prefix):
     """traits: list of (name, e1, e2). Returns dict[name -> {"threshold": float|None, "cluster_map": dict|None}]."""
     hpix = int(len(sample_ids) / 12)
     sample_ids = np.array(sample_ids)
-    linkage_matrix = sch.linkage(distance_matrix, method='average')
+    # linkage expects a condensed distance vector; passing the full symmetric
+    # matrix silently corrupts the merge heights (scipy <= 1.15 warning only)
+    linkage_matrix = sch.linkage(squareform(distance_matrix, checks=False), method='average')
     np.save(f"{prefix}_linkage_matrix.npy", linkage_matrix)
     print(f"linkage_matrix saved to {prefix}_linkage_matrix.npy")
     with open(f"{prefix}_sample_ids.txt", "w") as fout:
         for sid in sample_ids:
             fout.write(sid + "\n")
-    plt.figure(figsize=(10, hpix))
-    sch.dendrogram(linkage_matrix, labels=sample_ids, orientation='left', leaf_rotation=360)
-    plt.title('Hierarchical Clustering Dendrogram')
-    with PdfPages(f"{prefix}_tree_dendrogram.pdf") as pdf_pages:
-        pdf_pages.savefig()
-    plt.close()
 
     # Distance=1 clustering (baseline, shared across traits)
     with open(f"{prefix}_tree_base_dis1_haplotype.txt", 'w') as tree_dist1:
@@ -89,12 +142,33 @@ def treebase_hap(distance_matrix, sample_ids, traits, prefix):
                         linkage_matrix, sample_ids, e1, e2)
                     found = True
                     break
+            if found:
+                break
 
         if not found:
             print(f"[!] {trait_name}: no threshold found separating {e1} from {e2}")
             trait_results[trait_name] = {"threshold": None, "cluster_map": None}
             trait_results[trait_name]["scores"] = compute_cophenetic_scores(
                 linkage_matrix, sample_ids, e1, e2)
+
+    # Dendrogram with branches colored by cluster: below the separation threshold each
+    # cluster gets its own color, matching the *_extram_based.txt cluster membership file.
+    sep_threshold = next((tr["threshold"] for tr in trait_results.values() if tr.get("threshold") is not None), None)
+    sch.set_link_color_palette(LINK_COLORS)
+    fig, ax = plt.subplots(figsize=(10, hpix))
+    sch.dendrogram(linkage_matrix, labels=sample_ids, orientation='left', leaf_rotation=360,
+                   leaf_font_size=6, color_threshold=sep_threshold,
+                   above_threshold_color=ABOVE_THRESHOLD_COLOR,
+                   link_color_func=_link_color_func(linkage_matrix, len(sample_ids), sep_threshold),
+                   ax=ax)
+    ax.set_xlabel('Genetic distance (Hamming)')
+    ax.set_ylabel('Sample')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    fig.tight_layout()
+    with PdfPages(f"{prefix}_tree_dendrogram.pdf") as pdf_pages:
+        pdf_pages.savefig()
+    plt.close(fig)
 
     return trait_results
 
@@ -214,13 +288,194 @@ def uclu(pop_vcf, prefix):
 
 ### Generate and save a heatmap visualization of pairwise distances.
 def plot_heatmap(distance_matrix, sample_ids, filename):
-    w, h = int(len(sample_ids)/5), int(len(sample_ids)/5)
-    plt.figure(figsize=(w, h))
-    sns.heatmap(distance_matrix, xticklabels=sample_ids, yticklabels=sample_ids, cmap='coolwarm', cbar_kws={'label': 'Hamming Distance'})
-    plt.title('Pairwise Hamming Distance Heatmap')
-    pdf_pages = PdfPages(filename)
-    pdf_pages.savefig()
-    pdf_pages.close()
+    """Saves two versions: an unlabeled publication-style heatmap and a labeled
+    version carrying small sample-ID labels on both axes."""
+    n = len(sample_ids)
+    base = filename.replace('.pdf', '')
+    # --- Unlabeled version (publication style) ---
+    fig, ax = plt.subplots(figsize=(min(9.0, max(4.5, n / 12)), min(9.0, max(4.5, n / 12))))
+    # Hide per-sample tick labels at population scale (unreadable when overlapping);
+    # the colorbar alone carries the quantitative information.
+    sns.heatmap(distance_matrix, xticklabels=False, yticklabels=False, cmap='YlGnBu',
+                square=True, linewidths=0, ax=ax, cbar_kws={'label': 'Hamming distance', 'shrink': 0.8})
+    ax.set_title('Pairwise Hamming Distance', pad=10)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    fig.tight_layout()
+    with PdfPages(f"{base}.pdf") as pdf_pages:
+        pdf_pages.savefig()
+    plt.close(fig)
+    # --- Labeled version (small sample-ID labels on both axes) ---
+    label_fs = max(3, min(7, int(420 / n)))
+    fig, ax = plt.subplots(figsize=(min(12.0, max(6.0, n / 8)), min(12.0, max(6.0, n / 8))))
+    sns.heatmap(distance_matrix, xticklabels=sample_ids, yticklabels=sample_ids, cmap='YlGnBu',
+                square=True, linewidths=0, ax=ax, cbar_kws={'label': 'Hamming distance', 'shrink': 0.8})
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=label_fs)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=label_fs)
+    ax.set_title('Pairwise Hamming Distance (labeled)', pad=10)
+    fig.tight_layout()
+    with PdfPages(f"{base}_labeled.pdf") as pdf_pages:
+        pdf_pages.savefig()
+    plt.close(fig)
+    print(f"[+] Heatmaps saved to {base}.pdf and {base}_labeled.pdf")
+
+
+### Generate a PCA scatter plot of haplotypes colored by cluster, with e1/e2 highlighted.
+def plot_pca(haplotypes_array, sample_ids, cluster_map, acc1, acc2, prefix):
+    from sklearn.decomposition import PCA
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(haplotypes_array)
+    var = pca.explained_variance_ratio_ * 100
+
+    labels = [str(cluster_map.get(sid, 'H?')) for sid in sample_ids] if cluster_map else ['H1'] * len(sample_ids)
+    unique_labels = sorted(set(labels))
+    color_map = {lab: LINK_COLORS[i % len(LINK_COLORS)] for i, lab in enumerate(unique_labels)}
+
+    fig, ax = plt.subplots(figsize=(6.5, 5.5))
+    for lab in unique_labels:
+        mask = np.array(labels) == lab
+        ax.scatter(coords[mask, 0], coords[mask, 1], s=30, c=color_map[lab], label=lab,
+                   edgecolors='white', linewidths=0.4, alpha=0.9, zorder=2)
+
+    # Highlight the extreme accessions with distinct markers + ID labels
+    e1_marker, e2_marker = '*', '^'
+    for acc, marker, color in [(acc1, e1_marker, '#D55E00'), (acc2, e2_marker, '#0072B2')]:
+        if acc is None or acc not in sample_ids:
+            continue
+        idx = list(sample_ids).index(acc)
+        ax.scatter(coords[idx, 0], coords[idx, 1], s=170, marker=marker, c=color,
+                   edgecolors='black', linewidths=0.8, zorder=5)
+        ax.annotate(acc, (coords[idx, 0], coords[idx, 1]), xytext=(9, 9),
+                    textcoords='offset points', fontsize=8, fontweight='bold', color='black')
+
+    ax.set_xlabel(f'PC1 ({var[0]:.1f}%)')
+    ax.set_ylabel(f'PC2 ({var[1]:.1f}%)')
+    ax.set_title('Haplotype PCA', pad=10)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    handles = [Patch(facecolor=color_map[lab], edgecolor='none', label=lab) for lab in unique_labels]
+    if acc1 is not None or acc2 is not None:
+        if acc1 is not None:
+            handles.append(Line2D([0], [0], marker=e1_marker, linestyle='none', markersize=9,
+                                  markerfacecolor='#D55E00', markeredgecolor='black',
+                                  label='e1 (favorable)'))
+        if acc2 is not None:
+            handles.append(Line2D([0], [0], marker=e2_marker, linestyle='none', markersize=9,
+                                  markerfacecolor='#0072B2', markeredgecolor='black',
+                                  label='e2 (unfavorable)'))
+    ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1.02, 0.5),
+              frameon=False, fontsize=7, title='Cluster', title_fontsize=8)
+
+    fig.tight_layout()
+    plt.savefig(f"{prefix}_PCA.pdf", dpi=300, bbox_inches='tight', format='pdf', backend=CAIRO_BACKEND)
+    plt.close(fig)
+    print(f"[+] PCA plot saved to {prefix}_PCA.pdf (PC1 {var[0]:.1f}%, PC2 {var[1]:.1f}%)")
+
+
+### Simulate a quantitative phenotype from haplotype similarity to two anchor
+### accessions and draw a per-haplotype-cluster boxplot.
+def plot_phenotype_boxplot(haplotypes_array, sample_ids, cluster_map, prefix,
+                           anchors=None, fallback_anchors=None, seed=42,
+                           phenotype_label='Days to flowering'):
+    """`anchors`: {sample_id: phenotype}, e.g. {'W24': 20.0, 'CGN22692': 60.0}.
+    Samples genetically close to an anchor get phenotypes close to that anchor
+    (linear interpolation of pairwise Hamming distance, plus small noise).
+    `fallback_anchors` are tried when an anchor is missing from the data.
+    Also writes {prefix}_{phenotype}_simulated_phenotype.txt."""
+    if anchors is None:
+        anchors = {'W24': 20.0, 'CGN22692': 60.0}
+    present = {acc: val for acc, val in anchors.items() if acc in sample_ids}
+    if len(present) < 2 and fallback_anchors:
+        for acc, val in fallback_anchors.items():
+            if acc in sample_ids and acc not in present:
+                present[acc] = val
+    if len(present) < 2:
+        print(f"[!] phenotype boxplot skipped: need >=2 anchor accessions present in the data "
+              f"(anchors={list(anchors)}, found={list(present)})")
+        return
+
+    slug = ''.join(c if c.isalnum() else '_' for c in phenotype_label.lower()).strip('_')
+    while '__' in slug:
+        slug = slug.replace('__', '_')
+    rng = np.random.default_rng(seed)
+    hap = np.asarray(haplotypes_array)
+    phenos = np.full(len(sample_ids), np.nan)
+
+    # Hamming distance of every sample to each anchor
+    acc_items = list(present.items())
+    (acc1, ph1), (acc2, ph2) = acc_items[0], acc_items[1]
+    d1 = np.mean(hap != hap[sample_ids.index(acc1)], axis=1)
+    d2 = np.mean(hap != hap[sample_ids.index(acc2)], axis=1)
+
+    # s in [0,1]: 0 -> like acc1 (e.g. early flowering), 1 -> like acc2 (late)
+    s = d1 / (d1 + d2 + 1e-12)
+    phenos = ph1 + s * (ph2 - ph1) + rng.normal(0, 1.5, len(sample_ids))
+    phenos = np.clip(phenos, min(ph1, ph2), max(ph1, ph2))
+    for acc, val in present.items():
+        phenos[sample_ids.index(acc)] = val
+
+    # Group by haplotype cluster; order clusters by median phenotype (early -> late)
+    labels = [str(cluster_map.get(sid, 'H?')) for sid in sample_ids] if cluster_map else ['H1'] * len(sample_ids)
+    order = sorted(set(labels), key=lambda lab: np.median(phenos[np.array(labels) == lab]))
+    color_map = {lab: LINK_COLORS[i % len(LINK_COLORS)] for i, lab in enumerate(order)}
+
+    fig, ax = plt.subplots(figsize=(max(5.0, len(order) * 0.9), 4.6))
+    data = [phenos[np.array(labels) == lab] for lab in order]
+    bp = ax.boxplot(data, patch_artist=True, widths=0.55,
+                    medianprops=dict(color='black', linewidth=1.1),
+                    flierprops=dict(marker='o', markersize=3, markerfacecolor='#999999',
+                                    markeredgecolor='none', alpha=0.6))
+    ax.set_xticks(range(1, len(order) + 1))
+    ax.set_xticklabels(order)
+    for patch, lab in zip(bp['boxes'], order):
+        patch.set_facecolor(color_map[lab])
+        patch.set_edgecolor('#333333')
+        patch.set_linewidth(0.7)
+    # Overlay individual samples with light jitter
+    for i, lab in enumerate(order):
+        vals = data[i]
+        x = np.random.default_rng(seed + i).normal(i + 1, 0.06, len(vals))
+        ax.scatter(x, vals, s=14, color='black', alpha=0.35, zorder=3, linewidths=0)
+    # Annotate anchor accessions
+    for acc, val in present.items():
+        lab = str(cluster_map.get(acc, 'H?'))
+        if lab in order:
+            x = order.index(lab) + 1
+            ax.annotate(f'{acc}\n({val:.0f} d)', (x, val), xytext=(0, 9),
+                        textcoords='offset points', ha='center', fontsize=7, fontweight='bold')
+
+    ax.set_ylabel(phenotype_label)
+    ax.set_xlabel('Haplotype cluster')
+    ax.set_title(f'{phenotype_label} by Haplotype Cluster', pad=10)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    fig.tight_layout()
+    plt.savefig(f"{prefix}_{slug}_boxplot.pdf", dpi=300, bbox_inches='tight', format='pdf',
+                backend=CAIRO_BACKEND)
+    plt.close(fig)
+
+    with open(f"{prefix}_{slug}_simulated_phenotype.txt", "w") as f:
+        f.write("sample_id\tcluster\tphenotype\n")
+        for sid, lab, p in zip(sample_ids, labels, phenos):
+            f.write(f"{sid}\t{lab}\t{p:.2f}\n")
+    print(f"[+] {phenotype_label} boxplot saved to {prefix}_{slug}_boxplot.pdf "
+          f"(anchors: {acc1}={ph1:.0f}, {acc2}={ph2:.0f})")
+
+### Map an allele to a display symbol: SNP base, 'I' (indel), 'SV' or 'NA'.
+def classify_allele(a):
+    if a in ('A', 'T', 'G', 'C'):
+        return a
+    if a == '*' or (a.startswith('<') and a.endswith('>')):
+        return 'SV'
+    if len(a) > 1:
+        return 'I'
+    return 'NA'
+
 
 ### Convert VCF file to a base-level matrix DataFrame.
 def vcf_to_base_matrix(vcf_file):
@@ -247,7 +502,7 @@ def vcf_to_base_matrix(vcf_file):
                 else:
                     try:
                         alleles = [ref if i == '0' else alts[int(i) - 1] for i in gt.replace('|', '/').split('/')]
-                        gts.append('/'.join(alleles))
+                        gts.append('/'.join(classify_allele(a) for a in alleles))
                     except:
                         gts.append('NA')
             base_matrix.append(gts)
@@ -257,9 +512,13 @@ def vcf_to_base_matrix(vcf_file):
 ### Generate and save a haplotype base table visualization with clustering information.
 def plot_base_hap_table_from_clustering(base_df, sample_clusters, tree_cluster_map, acc1, acc2, output_file, max_reps=None):
     """tree_cluster_map: dict[sample_id -> cluster_label] or None (falls back to strict clustering)."""
+    # Colorblind-safe (Okabe-Ito) allele colors, suitable for high-impact journals.
+    # 'I' = indel, 'SV' = structural variant.
     base_colors = {
-        'A': '#4daf4a', 'T': '#e41a1c', 'G': '#377eb8', 'C': '#ff7f00', 'NA': '#bdbdbd'
+        'A': '#0072B2', 'T': '#D55E00', 'G': '#009E73', 'C': '#CC79A7',
+        'I': '#E69F00', 'SV': '#8C564B', 'NA': '#BDBDBD'
     }
+    legend_alleles = ['A', 'T', 'G', 'C', 'I', 'SV', 'NA']
     if tree_cluster_map is None:
         tree_cluster_map = {row['sampleID']: f"H{row['cluster']}" for _, row in sample_clusters.iterrows()}
 
@@ -291,7 +550,7 @@ def plot_base_hap_table_from_clustering(base_df, sample_clusters, tree_cluster_m
     filtered_df = filtered_df.loc[:, (filtered_df != filtered_df.iloc[0]).any()]
     filtered_df = filtered_df.loc[:, ~(filtered_df == 'NA').any()]
     base_df.to_csv(f"{output_file.replace('.pdf', '_full_table.txt')}", sep='\t')
-    fig, ax = plt.subplots(figsize=(max(8, len(filtered_df.columns)*0.4), max(4, len(filtered_df)*0.5)))
+    fig, ax = plt.subplots(figsize=(max(8, len(filtered_df.columns)*0.35), max(4, len(filtered_df)*0.4)))
     for i, sample in enumerate(filtered_df.index):
         for j, variant in enumerate(filtered_df.columns):
             val = filtered_df.loc[sample, variant]
@@ -302,22 +561,28 @@ def plot_base_hap_table_from_clustering(base_df, sample_clusters, tree_cluster_m
                 bases = val.split('/')
                 display = ''.join(sorted(set(bases)))
                 color = base_colors.get(bases[0], '#ffffff')
-            ax.add_patch(plt.Rectangle((j, i), 1, 1, color=color, edgecolor='black'))
-            ax.text(j+0.5, i+0.5, display, ha='center', va='center', fontsize=10)
+            ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=color, edgecolor='white', lw=0.4))
+            ax.text(j+0.5, i+0.5, display, ha='center', va='center', fontsize=7)
     ax.set_xticks([i + 0.5 for i in range(len(filtered_df.columns))])
-    ax.set_xticklabels(filtered_df.columns, rotation=45, fontsize=8, ha='right')
+    ax.set_xticklabels(filtered_df.columns, rotation=90, fontsize=6, ha='center')
     ax.set_yticks([i + 0.5 for i in range(len(filtered_df.index))])
-    ax.set_yticklabels(filtered_df.index, fontsize=8)
+    ax.set_yticklabels(filtered_df.index, fontsize=6)
     ax.set_xlim(0, len(filtered_df.columns))
     ax.set_ylim(0, len(filtered_df.index))
     ax.invert_yaxis()
-    ax.set_title("Haplotype Base Table", fontsize=12)
-    plt.tight_layout()
+    ax.set_title("Haplotype Base Table", pad=10)
+    ax.spines[:].set_visible(False)
+    # Allele color legend
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=base_colors[b], edgecolor='none', label=b) for b in legend_alleles]
+    ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.03),
+              ncol=len(legend_alleles), frameon=False, fontsize=8, handlelength=1.0, handleheight=1.0)
+    fig.tight_layout()
     plt.savefig(output_file, dpi=300, format='pdf', bbox_inches='tight', backend=CAIRO_BACKEND)
     print(f"[+] Haplotype base plot saved to: {output_file}")
 
 ### Generate and save a combined visualization of dendrogram and haplotype base table.
-def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, prefix="result"):
+def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, prefix="result", color_threshold=None):
     import matplotlib.gridspec as gridspec
     # Read linkage matrix
     linkage_matrix = np.load(linkage_matrix_file, allow_pickle=True)
@@ -338,7 +603,11 @@ def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, pr
 
     # --- Left panel: dendrogram ---
     ax1 = plt.subplot(gs[0])
-    dendro = sch.dendrogram(linkage_matrix, orientation='left', labels=base_df.index, ax=ax1)
+    sch.set_link_color_palette(LINK_COLORS)
+    dendro = sch.dendrogram(linkage_matrix, orientation='left', labels=base_df.index,
+                            color_threshold=color_threshold, above_threshold_color=ABOVE_THRESHOLD_COLOR,
+                            link_color_func=_link_color_func(linkage_matrix, len(base_df), color_threshold),
+                            ax=ax1)
     leaf_order = dendro['ivl']   # Get leaf order from dendrogram
     leaf_order_for_table = leaf_order[::-1]
 
@@ -347,9 +616,10 @@ def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, pr
     ax2 = plt.subplot(gs[1])
 
     base_colors = {
-        'A': '#4daf4a', 'T': '#e41a1c', 'G': '#377eb8',
-        'C': '#ff7f00', 'NA': '#bdbdbd'
+        'A': '#0072B2', 'T': '#D55E00', 'G': '#009E73',
+        'C': '#CC79A7', 'I': '#E69F00', 'SV': '#8C564B', 'NA': '#BDBDBD'
     }
+    legend_alleles = ['A', 'T', 'G', 'C', 'I', 'SV', 'NA']
 
     for i, sample in enumerate(ordered_df.index):
         for j, val in enumerate(ordered_df.columns):
@@ -360,16 +630,29 @@ def plot_tree_with_base_table(linkage_matrix_file, hap_base_file, output_pdf, pr
                 bases = str(base).split('/')
                 text = ''.join(sorted(set(bases)))
                 color = base_colors.get(bases[0], '#ffffff')
-            ax2.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=color, edgecolor='black'))
-            ax2.text(j+0.5, i+0.5, text, ha='center', va='center', fontsize=6)
+            ax2.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=color, edgecolor='white', lw=0.4))
+            ax2.text(j+0.5, i+0.5, text, ha='center', va='center', fontsize=5)
 
     ax2.set_xlim(0, len(ordered_df.columns))
     ax2.set_ylim(0, len(ordered_df.index))
     ax2.invert_yaxis()
     ax2.set_xticks(np.arange(len(ordered_df.columns)) + 0.5)
-    ax2.set_xticklabels(ordered_df.columns, rotation=90, fontsize=6)
+    ax2.set_xticklabels(ordered_df.columns, rotation=90, fontsize=5, ha='center')
     ax2.set_yticks([])
     ax2.set_yticklabels([])
+    ax2.spines[:].set_visible(False)
+
+    # Dendrogram styling
+    ax1.set_xlabel('Genetic distance (Hamming)', fontsize=7)
+    ax1.tick_params(labelsize=5)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
+
+    # Allele color legend
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=base_colors[b], edgecolor='none', label=b) for b in legend_alleles]
+    ax2.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.02),
+               ncol=len(legend_alleles), frameon=False, fontsize=7, handlelength=1.0, handleheight=1.0)
 
     plt.tight_layout()
     plt.savefig(output_pdf, dpi=300, bbox_inches="tight", format="pdf")
@@ -500,8 +783,8 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
             matrix[i, j] = row[c]
         avg_scores[i] = row['total_score'] / n_traits
 
-    # Diverging colormap: red (neg) -> white (0) -> green (pos)
-    cmap = sns.diverging_palette(10, 130, s=80, l=55, as_cmap=True)
+    # Colorblind-safe diverging palette (ColorBrewer RdBu): blue = favorable, red = unfavorable
+    cmap = sns.diverging_palette(10, 250, s=85, l=50, as_cmap=True)
     norm = matplotlib.colors.Normalize(vmin=-100, vmax=100)
 
     fig_height = max(6, n_plot * 0.22)
@@ -509,7 +792,6 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
     fig.subplots_adjust(left=0.18, right=0.93, top=0.95, bottom=0.08)
 
     # ---- Heatmap (draw top-to-bottom, no inversion needed) ----
-    ax_heatmap.set_facecolor('#f5f5f5')
     for i in range(n_plot):
         y_bottom = n_plot - 1 - i  # row 0 (best) at top
         for j in range(n_traits):
@@ -518,7 +800,7 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
             ax_heatmap.add_patch(plt.Rectangle((j, y_bottom), 1, 1, facecolor=color, edgecolor='white', lw=0.5))
             text_color = 'white' if abs(val) > 50 else 'black'
             ax_heatmap.text(j + 0.5, y_bottom + 0.5, f"{int(val):+d}", ha='center', va='center',
-                            fontsize=7, color=text_color, weight='bold')
+                            fontsize=7, color=text_color)
 
     ax_heatmap.set_xlim(0, n_traits)
     ax_heatmap.set_ylim(0, n_plot)
@@ -528,21 +810,22 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
     for i in range(n_plot):
         y_center = n_plot - 0.5 - i
         ax_heatmap.text(-0.1, y_center, df_plot['sample_id'].values[i],
-                        ha='right', va='center', fontsize=5, clip_on=False)
-    ax_heatmap.set_title("Cophenetic Score Matrix", fontsize=12)
+                        ha='right', va='center', fontsize=5.5, clip_on=False)
+    ax_heatmap.set_title("Breeding Selection Matrix", pad=10)
+    ax_heatmap.set_xlabel("Trait")
+    ax_heatmap.set_ylabel("Sample (ranked by total score)")
 
     # ---- Bar chart: use divider for guaranteed alignment ----
     divider = make_axes_locatable(ax_heatmap)
     ax_bar = divider.append_axes("right", size="15%", pad=0.08, sharey=ax_heatmap)
 
     y_positions = np.array([n_plot - 0.5 - i for i in range(n_plot)])
-    bar_colors = ['#4daf4a' if v > 0 else '#e41a1c' if v < 0 else '#999999' for v in avg_scores]
+    bar_colors = ['#2166AC' if v > 0 else '#B2182B' if v < 0 else '#999999' for v in avg_scores]
     ax_bar.barh(y_positions, avg_scores, height=1.0,
                 color=bar_colors, edgecolor='none')
-    ax_bar.axvline(0, color='black', linewidth=0.5)
+    ax_bar.axvline(0, color='#666666', linewidth=0.6)
     ax_bar.set_xlim(-105, 105)
-    ax_bar.set_xlabel("Avg", fontsize=8)
-    ax_bar.set_title("Avg", fontsize=10)
+    ax_bar.set_xlabel("Average score")
     ax_bar.set_ylim(0, n_plot)
     ax_bar.set_yticks([])
     ax_bar.set_yticklabels([])
@@ -551,7 +834,7 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
     cax = divider.append_axes("bottom", size="3%", pad=0.25)
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     cbar = fig.colorbar(sm, cax=cax, orientation='horizontal')
-    cbar.set_label("Score", fontsize=8)
+    cbar.set_label("Cophenetic score", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
     plt.savefig(f"{prefix}_breeding_matrix.pdf", dpi=300, bbox_inches='tight')
@@ -560,7 +843,7 @@ def plot_breeding_heatmap(breeding_df, trait_results, prefix):
 
 
 ### Main pipeline: per-trait haplotype analysis + breeding selection merge.
-def bro(traits, prefix, max_reps=None):
+def bro(traits, prefix, max_reps=None, phenotype_label='Days to flowering', anchors=None):
     """traits: list of (name, vcf, e1, e2). Runs per-trait clustering, then merges into breeding outputs."""
     all_trait_results = {}
     all_sample_ids = set()
@@ -568,7 +851,7 @@ def bro(traits, prefix, max_reps=None):
     for trait_name, vcf, e1, e2 in traits:
         trait_prefix = f"{prefix}_{trait_name}"
         print(f"\n{'='*50}\n  Processing trait: {trait_name} (vcf={vcf})\n{'='*50}")
-        clu_df, n_clu, dist_mat, _, sample_ids, _ = uclu(vcf, trait_prefix)
+        clu_df, n_clu, dist_mat, _, sample_ids, hap_array = uclu(vcf, trait_prefix)
         all_sample_ids.update(sample_ids)
         tr = treebase_hap(dist_mat, sample_ids, [(trait_name, e1, e2)], trait_prefix)
         tr[trait_name]["e1"] = e1
@@ -581,11 +864,18 @@ def bro(traits, prefix, max_reps=None):
         cm_for_plot = tr[trait_name]["cluster_map"]
         if cm_for_plot is not None:
             cm_for_plot = {sid: f"H{cid}" for sid, cid in cm_for_plot.items()}
+        else:
+            cm_for_plot = {row['sampleID']: f"H{row['cluster']}" for _, row in clu_df.iterrows()}
+        plot_pca(hap_array, sample_ids, cm_for_plot, e1, e2, trait_prefix)
+        plot_phenotype_boxplot(hap_array, sample_ids, cm_for_plot, trait_prefix,
+                               anchors=anchors, fallback_anchors={e1: 20.0, e2: 60.0},
+                               phenotype_label=phenotype_label)
         plot_base_hap_table_from_clustering(base_df, clu_df, cm_for_plot, e1, e2,
                                             output_file=f'{trait_prefix}_hap_base_table.pdf', max_reps=reps)
         plot_tree_with_base_table(f"{trait_prefix}_linkage_matrix.npy",
                                   f"{trait_prefix}_hap_base_table.pdf".replace('.pdf', '_full_table.txt'),
-                                  f"{trait_prefix}_tree_with_base_table.pdf")
+                                  f"{trait_prefix}_tree_with_base_table.pdf",
+                                  color_threshold=tr[trait_name]["threshold"])
 
     # Breeding merge
     print(f"\n{'='*50}\n  Building breeding selection matrix\n{'='*50}")
@@ -607,6 +897,11 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, default='result', help='Prefix for all output files.')
     parser.add_argument('--max_reps', type=int, default=None,
                         help='Maximum number of representative haplotypes to plot (default: number of clusters).')
+    parser.add_argument('--phenotype', type=str, default='Days to flowering',
+                        help='Phenotype name used for the simulated boxplot (default: "Days to flowering").')
+    parser.add_argument('--anchors', type=str, default='W24:20,CGN22692:60',
+                        help='Anchor accessions and their phenotype values for simulation, '
+                             'format "acc:value,acc:value" (default: "W24:20,CGN22692:60").')
     args = parser.parse_args()
 
     # Normalize to traits list: list of (name, vcf, e1, e2)
@@ -628,6 +923,12 @@ if __name__ == "__main__":
     if not traits:
         parser.error("Either --trait or a VCF file + --e1acc/--e2acc must be provided.")
 
-    bro(traits, args.prefix, args.max_reps)
+    anchors = {}
+    for item in args.anchors.split(','):
+        if ':' not in item:
+            parser.error(f"--anchors format must be acc:value,acc:value, got '{item}'")
+        acc, val = item.split(':', 1)
+        anchors[acc.strip()] = float(val)
+    bro(traits, args.prefix, args.max_reps, phenotype_label=args.phenotype, anchors=anchors)
 
 

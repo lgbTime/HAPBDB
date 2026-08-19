@@ -1,13 +1,13 @@
 # HAPBDB — Haplotype-Aware Phenotype Based Design Breeding
 
-A Python tool for haplotype clustering and genetic distance visualization from VCF (Variant Call Format) files. HAPBDB performs unsupervised hierarchical clustering on samples using Hamming distance over one-hot encoded haplotypes, then generates publication-quality visualizations: dendrograms, pairwise heatmaps, and base-level genotype tables. When extreme-phenotype accessions are specified, it automatically finds the minimum distance threshold that separates them — directly informing breeding selection decisions.
+A Python tool for haplotype clustering and genetic distance visualization from VCF (Variant Call Format) files. HAPBDB performs unsupervised hierarchical clustering on samples using Hamming distance over one-hot encoded haplotypes, then generates publication-quality visualizations: cluster-colored dendrograms, pairwise heatmaps (unlabeled and labeled versions), PCA projections with the extreme accessions highlighted, haplotype base tables with dedicated indel/SV colors, and a simulated haplotype–phenotype boxplot. When extreme-phenotype accessions are specified, it automatically finds the minimum distance threshold that separates them — directly informing breeding selection decisions.
 
 The project includes two versions:
 
 | Version | Script | Use case |
 |---------|--------|----------|
 | **Single-trait** | `HAPBDB.py` | One VCF, one trait, one pair of extreme accessions |
-| **Multi-trait** | `multi_traits_HAPBDB/mutil_traits_HAPBDB.py` | Multiple traits, each with its own VCF and extreme accessions, merged into a breeding selection matrix |
+| **Multi-trait** | `multi_traits_HAPBDB/multi_traits_HAPBDB.py` | Multiple traits, each with its own VCF and extreme accessions, merged into a breeding selection matrix |
 
 ---
 
@@ -19,11 +19,29 @@ The project includes two versions:
 
 2. **Hamming distance** — Computes the pairwise Hamming distance matrix across all samples. Samples with similar haplotype profiles have lower distances.
 
-3. **Hierarchical clustering** — Builds a linkage matrix via average-linkage agglomerative clustering and renders a dendrogram.
+3. **Hierarchical clustering** — Builds a linkage matrix via average-linkage agglomerative clustering and renders a dendrogram whose branch colors encode cluster membership: each cluster below the separation threshold is drawn in its own colorblind-safe color, identical to the cluster IDs in the `*_extram_based.txt` files.
 
 4. **Threshold search** (when `--e1acc` and `--e2acc` are provided) — Sweeps thresholds from 1.0 down to 0.01 until the two extreme accessions land in different clusters. This threshold is the minimum genetic distance needed to separate favorable from unfavorable phenotypes — a data-driven cutoff for breeding decisions.
 
-5. **Visualizations** — Generates four PDF figures and tabular outputs.
+5. **PCA overview** — Projects the one-hot haplotype matrix onto its top two principal components. Each sample is plotted as a point colored by its cluster (same cluster colors as the dendrogram), and the extreme accessions e1/e2 are highlighted with distinct markers and ID labels.
+
+6. **Haplotype–phenotype boxplot** — Simulates a quantitative trait and tests its distribution per haplotype cluster. Each sample's phenotype is interpolated between two **anchor accessions** based on its Hamming distance to them (anchors are fixed at their known values, small Gaussian noise is added), then drawn as a cluster-colored boxplot with anchor annotation. Configure with `--phenotype` (trait name) and `--anchors` (`acc:value,acc:value`); defaults: `Days to flowering`, anchors `W24` = 20 (early) and `CGN22692` = 60 (late). If an anchor is absent from the data, `--e1acc`/`--e2acc` are used instead (e1 = 20, e2 = 60). The simulated phenotype table is written to `{prefix}_{phenotype}_simulated_phenotype.txt`.
+
+7. **Visualizations** — Generates publication-quality PDF figures: dendrogram, PCA, pairwise distance heatmaps (labeled + unlabeled), phenotype boxplot, haplotype base table and the combined tree + base table view, plus all tabular outputs.
+
+### Example output
+
+The figures below were generated from the demo dataset (`demo_data/demo.vcf`, 80 samples × 80 variants) with `--e1acc CGN22050 --e2acc CGN22692`:
+
+| Dendrogram | Haplotype PCA (e1/e2 marked) | Labeled distance heatmap |
+|------------|------------------------------|--------------------------|
+| ![Dendrogram](figures/demo_tree_dendrogram.png) | ![PCA](figures/demo_PCA.png) | ![Labeled heatmap](figures/demo_Pairwise_Hamming_Distanced_Heatmap_labeled.png) |
+
+An unlabeled, publication-style version of the heatmap is also written as `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf`.
+
+| Representative haplotype base table | Dendrogram + base table (combined) | Days to flowering by haplotype cluster |
+|-------------------------------------|------------------------------------|----------------------------------------|
+| ![Base table](figures/demo_hap_base_table.png) | ![Tree with base table](figures/demo_tree_with_base_table.png) | ![Flowering boxplot](figures/demo_days_to_flowering_boxplot.png) |
 
 ### Output files
 
@@ -36,15 +54,19 @@ The project includes two versions:
 | `{prefix}_tree_base_dis1_haplotype.txt` | Cluster membership at distance threshold = 1.0 |
 | `{prefix}_tree_dist{threshold}_extram_based.txt` | Cluster membership at the separation threshold |
 | `{prefix}_hap_base_full_table.txt` | Full base-level genotype table (samples × variants) |
-| `{prefix}_tree_dendrogram.pdf` | Hierarchical clustering dendrogram |
-| `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf` | Pairwise distance heatmap |
+| `{prefix}_tree_dendrogram.pdf` | Hierarchical clustering dendrogram (branches colored by cluster) |
+| `{prefix}_PCA.pdf` | PCA projection of haplotypes, colored by cluster, with e1/e2 highlighted |
+| `{prefix}_{phenotype}_boxplot.pdf` | Simulated phenotype per haplotype cluster (anchors annotated), e.g. `{prefix}_days_to_flowering_boxplot.pdf` |
+| `{prefix}_{phenotype}_simulated_phenotype.txt` | Simulated phenotype table (sample × cluster × phenotype value) |
+| `{prefix}_Pairwise_Hamming_Distanced_Heatmap.pdf` | Pairwise distance heatmap (unlabeled, publication style) |
+| `{prefix}_Pairwise_Hamming_Distanced_Heatmap_labeled.pdf` | Pairwise distance heatmap with sample-ID labels |
 | `{prefix}_hap_base_table.pdf` | Representative haplotype base table |
 | `{prefix}_tree_with_base_table.pdf` | Side-by-side dendrogram and base table |
 
 ### Usage
 
 ```bash
-python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N]
+python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_reps N] [--phenotype NAME] [--anchors acc:value,acc:value]
 ```
 
 | Argument | Required | Default | Description |
@@ -54,10 +76,17 @@ python HAPBDB.py <vcf_file> [--e1acc ID] [--e2acc ID] [--prefix PREFIX] [--max_r
 | `--e2acc` | No | `None` | Unfavorable extreme accession ID |
 | `--prefix` | No | `result` | Prefix for all output files |
 | `--max_reps` | No | *n_clusters* | Max representative haplotypes in base table plot |
+| `--phenotype` | No | `Days to flowering` | Phenotype name for the simulated boxplot (used in axis labels and output filenames) |
+| `--anchors` | No | `W24:20,CGN22692:60` | Anchor accessions and their phenotype values, format `acc:value,acc:value` |
 
-**Example:**
+**Examples:**
 ```bash
+# Default demo: flowering time simulated from W24 (20 d) and CGN22692 (60 d)
 python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis
+
+# Custom phenotype and anchors, e.g. plant height (cm)
+python HAPBDB.py QTL1.vcf --e1acc CGN22050 --e2acc CGN22692 --prefix my_analysis \
+    --phenotype "Plant height (cm)" --anchors "CGN22050:90,CGN22692:40"
 ```
 
 ---
@@ -98,7 +127,23 @@ A structured text report containing:
 
 #### Breeding matrix heatmap (`{prefix}_breeding_matrix.pdf`)
 
-A red-white-green diverging heatmap of the top 100 samples × all traits, with a sidebar bar chart showing each sample's average score. Green = favorable, red = unfavorable.
+A colorblind-safe blue-white-red diverging heatmap (ColorBrewer RdBu) of the top 100 samples × all traits, with a sidebar bar chart showing each sample's average score. Blue = favorable, red = unfavorable.
+
+> **Publication-ready styling:** all figures use colorblind-safe palettes — Okabe-Ito colors for allele base tables (A/T/G/C SNPs plus dedicated colors for indels and SVs), the colorblind-safe RdBu diverging scheme for score heatmaps — suitable for high-impact journals.
+
+#### Example output
+
+From the multi-trait demo (`multi_traits.sh`, 3 traits × 100 samples):
+
+| Breeding matrix heatmap (top 100 samples × 3 traits) | Per-trait dendrogram (trait t1) |
+|------------------------------------------------------|--------------------------------|
+| ![Breeding matrix](figures/demo_breeding_matrix.png) | ![t1 dendrogram](figures/demo_t1_tree_dendrogram.png) |
+
+Per-trait PCA, phenotype boxplots, heatmaps and base tables are also produced for each trait, e.g.:
+
+| t1 haplotype PCA (e1/e2 marked) | t1 flowering-time boxplot | t1 labeled distance heatmap | t1 haplotype base table |
+|---------------------------------|---------------------------|-----------------------------|-------------------------|
+| ![t1 PCA](figures/demo_t1_PCA.png) | ![t1 boxplot](figures/demo_t1_days_to_flowering_boxplot.png) | ![t1 heatmap](figures/demo_t1_Pairwise_Hamming_Distanced_Heatmap_labeled.png) | ![t1 base table](figures/demo_t1_hap_base_table.png) |
 
 ### Usage
 
@@ -115,12 +160,14 @@ Each `--trait` argument has the format `name:vcf,e1,e2` and can be repeated for 
 |----------|-------------|
 | `--trait name:vcf,e1,e2` | Define one trait (repeat for each trait) |
 | `--prefix` | Output prefix (directory paths allowed) |
+| `--phenotype` | Phenotype name for the simulated boxplot (default: `Days to flowering`) |
+| `--anchors` | Anchor accessions and phenotype values for simulation (default: `W24:20,CGN22692:60`); per-trait `e1`/`e2` (e1 = 20, e2 = 60) are used as fallback when the anchors are not in a trait's VCF |
 
 **Backward compatible:** You can also call it with a single VCF and `--e1acc`/`--e2acc` like the single-trait version.
 
 ### Multi-trait output files
 
-Everything from single-trait (per trait, prefixed `{prefix}_{trait_name}_*`) plus:
+Everything from single-trait (per trait, prefixed `{prefix}_{trait_name}_*`, including PCA and the phenotype boxplot) plus:
 
 | File | Description |
 |------|-------------|
@@ -159,11 +206,13 @@ HAPBDB/
 ├── run.sh                         # Entry point → runs example.sh
 ├── example.sh                     # Single-trait demo
 ├── requirements.txt               # Python dependencies
+├── figures/                       # Example output images (used in this README)
 ├── demo_data/
 │   ├── extract_demo_vcf.py        # Extracts demo VCF from QTL1.vcf
-│   └── demo.vcf                   # 80 samples × 80 variants (includes CGN22050 & CGN22692)
+│   └── demo.vcf                   # 80 samples × 80 variants (includes CGN22050, CGN22692 & W24)
+├── demo_out/                      # Single-trait demo outputs
 ├── multi_traits_HAPBDB/
-│   ├── mutil_traits_HAPBDB.py     # Multi-trait pipeline with breeding scores
+│   ├── multi_traits_HAPBDB.py     # Multi-trait pipeline with breeding scores
 │   ├── multi_traits.sh            # Multi-trait demo (3 traits)
 │   ├── demo_data/
 │   │   ├── QTL_trait1_100.vcf     # 100 samples × 80 variants
@@ -178,7 +227,8 @@ HAPBDB/
 HAPBDB is designed for **marker-assisted breeding programs**:
 
 - Given QTL-associated VCF files and accessions at opposite trait extremes, identify the genetic distance threshold that separates favorable from unfavorable haplotypes.
-- Base table visualizations show which specific SNP alleles distinguish the clusters, helping breeders choose crosses that break undesirable linkages.
+- Base table visualizations show which specific SNP alleles distinguish the clusters — SNPs are colored A/T/G/C, indels (`I`, orange) and structural variants (`SV`, brown) get their own colors — helping breeders choose crosses that break undesirable linkages.
+- The PCA projection and the haplotype–phenotype boxplot provide an intuitive overview of population structure and of how haplotype clusters track a target trait.
 - The multi-trait version ranks breeding lines across multiple target traits simultaneously and recommends complementary cross pairs.
 
 ## License
@@ -187,4 +237,7 @@ MIT License.
 
 ## Citation
 
-If you use HAPBDB in your research, please cite the repository.
+If you use HAPBDB in your research, please cite:
+
+> Tu, Z., Luo, G., Xiao, L., Wei, M., Zhang, J., & Wang, X. A haplotype-based breeding framework for the precise pyramiding of elite QTL alleles: a lettuce case study.
+> DOI: [https://doi.org/10.64898/2026.08.12.744550](https://doi.org/10.64898/2026.08.12.744550)
